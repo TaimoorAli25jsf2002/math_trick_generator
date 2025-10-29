@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Mind Trick Generator</title>
+<style>
+  :root{
+    --bg:#fbfbfb; --card:#fff; --muted:#6b7280; --accent:#111827; --accent2:#374151;
+    --radius:12px; --pad:14px; --shadow:0 8px 24px rgba(15,23,42,0.06);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;background:var(--bg);color:var(--accent);padding:28px;display:flex;justify-content:center}
+  .wrap{width:100%;max-width:920px}
+  h1{margin:0 0 6px;font-size:20px}
+  p.lead{margin:0 0 18px;color:var(--muted)}
+  .grid{display:grid;grid-template-columns:1fr 360px;gap:18px}
+  .card{background:var(--card);border-radius:var(--radius);padding:var(--pad);box-shadow:var(--shadow);border:1px solid rgba(0,0,0,0.04)}
+  label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+  .row{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+  input[type="number"], input[type="text"], select {width:100%;padding:10px;border-radius:8px;border:1px solid rgba(15,23,42,0.06);font-size:14px}
+  .small{width:120px}
+  .btn{padding:10px 12px;border-radius:10px;border:0;background:linear-gradient(90deg,var(--accent),var(--accent2));color:white;font-weight:600;cursor:pointer}
+  .muted{color:var(--muted);font-size:13px}
+  .result{background:#f8fafc;padding:12px;border-radius:8px;border:1px solid rgba(0,0,0,0.03);font-family:var(--mono);white-space:pre-wrap}
+  .steps{margin-top:8px}
+  .controls-bottom{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .copy{background:transparent;border:1px dashed rgba(15,23,42,0.06);padding:8px 10px;border-radius:8px;cursor:pointer}
+  .testRow{display:flex;gap:8px;align-items:center;margin-top:12px}
+  .note{font-size:13px;color:var(--muted);margin-top:8px}
+  @media (max-width:920px){.grid{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Mind Trick Generator by Taimoor Ali</h1>
+    <p class="lead">Enter M, A, D and pick order. Generator computes the correct subtraction so the constant cancels. Steps only — no formulas shown.</p>
+
+    <div class="grid">
+      <div class="card">
+        <label>Choose step order</label>
+        <div class="row">
+          <label style="margin:0;"><input type="radio" name="order" value="multiply" checked> Multiply → Add → Divide → Subtract</label>
+        </div>
+        <div class="row">
+          <label style="margin:0;"><input type="radio" name="order" value="add"> Add → Multiply → Divide → Subtract</label>
+        </div>
+
+        <div style="height:8px"></div>
+
+        <label>Multiplier (M)</label>
+        <input id="M" type="number" step="1" value="5" min="1" />
+
+        <label style="margin-top:8px">Add value (A)</label>
+        <input id="A" type="number" step="1" value="10" />
+
+        <label style="margin-top:8px">Divider (D)</label>
+        <input id="D" type="number" step="1" value="10" min="1" />
+
+        <div style="height:10px"></div>
+        <div class="controls-bottom">
+          <button class="btn" id="generate">Generate Trick</button>
+          <button class="copy" id="copySteps">Copy Steps</button>
+          <button class="copy" id="copyFormula">Copy Formula</button>
+        </div>
+
+        <div class="note">Validation: D must not be zero. If A ÷ D or (M×A) ÷ D is not an integer you will get a decimal subtraction (trimmed to 4 decimals).</div>
+
+        <div style="height:12px"></div>
+
+        <label>Quick test — try an original number (x)</label>
+        <div class="testRow">
+          <input id="testX" type="number" step="any" placeholder="e.g. 7" />
+          <button class="btn" id="runTest">Run Test</button>
+        </div>
+
+        <div style="height:10px"></div>
+        <div>
+          <div class="muted">Forward result (what user reports):</div>
+          <div id="forwardOut" class="result">—</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div><strong>Trick preview</strong><div class="muted" style="font-size:12px">Steps you will tell the user</div></div>
+          <div id="idBadge" class="muted"> </div>
+        </div>
+
+        <div class="steps" id="stepsPreview" style="margin-top:10px">
+          <!-- steps injected here -->
+        </div>
+
+        <div style="height:12px"></div>
+
+        <div><strong class="muted">Reverse formula (what your app uses)</strong></div>
+        <div id="formulaOut" class="result" style="margin-top:8px">—</div>
+
+        <div style="height:12px"></div>
+        <div class="muted">Notes</div>
+        <div id="notes" class="muted" style="margin-top:6px"> </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // Helpers
+  function fmtNum(n) {
+    if (Number.isInteger(n)) return String(n);
+    // show up to 4 decimals, trim zeros
+    return (Math.round(n * 10000) / 10000).toFixed(4).replace(/\.?0+$/, '');
+  }
+
+  function getOrder() {
+    return document.querySelector('input[name="order"]:checked').value; // "multiply" or "add"
+  }
+
+  function compute() {
+    const M = Number(document.getElementById('M').value);
+    const A = Number(document.getElementById('A').value);
+    const D = Number(document.getElementById('D').value);
+
+    const order = getOrder();
+
+    if (!isFinite(M) || !isFinite(A) || !isFinite(D) || D === 0) {
+      return { error: 'Enter valid numbers (D must not be 0).' };
+    }
+
+    // a = M / D  (the multiplier you divide the final by)
+    const a = M / D;
+
+    // compute subtract S depending on order
+    let S;
+    if (order === 'multiply') {
+      // Multiply first: ×M → +A → ÷D → −S  => S = A / D
+      S = A / D;
+    } else {
+      // Add first: +A → ×M → ÷D → −S  => S = (M * A) / D
+      S = (M * A) / D;
+    }
+
+    // compute b (offset) in final F = a * x + b
+    // For multiply-first: F = (M/D)x + (A/D - S) = a*x + (A/D - S)
+    // For add-first:      F = (M/D)x + ((M*A)/D - S) = a*x + ((M*A)/D - S)
+    let b;
+    if (order === 'multiply') b = (A / D) - S;
+    else b = ((M * A) / D) - S;
+
+    // rounding/trimming
+    return {
+      M, A, D, order,
+      a: a, S: S, b: b,
+      a_str: fmtNum(a),
+      S_str: fmtNum(S),
+      b_str: fmtNum(b)
+    };
+  }
+
+  function renderAll() {
+    const out = compute();
+    const stepsDiv = document.getElementById('stepsPreview');
+    const formulaDiv = document.getElementById('formulaOut');
+    const notesDiv = document.getElementById('notes');
+    const forwardOut = document.getElementById('forwardOut');
+
+    if (out.error) {
+      stepsDiv.innerHTML = '<div class="muted">Error: ' + out.error + '</div>';
+      formulaDiv.textContent = '—';
+      notesDiv.textContent = '';
+      forwardOut.textContent = '—';
+      return;
+    }
+
+    const {M,A,D,order,a_str,S_str,b_str} = out;
+
+    // build steps array depending on order
+    let steps;
+    if (order === 'multiply') {
+      steps = [
+        `Think of a number`,
+        `Multiply by ${M}`,
+        `Add ${A}`,
+        `Divide by ${D}`,
+        `Subtract ${S_str}`
+      ];
+    } else {
+      steps = [
+        `Think of a number`,
+        `Add ${A}`,
+        `Multiply by ${M}`,
+        `Divide by ${D}`,
+        `Subtract ${S_str}`
+      ];
+    }
+
+    // render steps
+    stepsDiv.innerHTML = steps.map((s,i)=>`<div style="display:flex;gap:8px;margin-bottom:8px"><div style="width:28px;height:28;border-radius:6px;background:#111;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700">${i+1}</div><div>${s}</div></div>`).join('');
+
+    // Reverse formula derivation: final = a*x + b  => x = (final - b)/a
+    // but when we set S = A/D or (M*A)/D, b becomes zero; show both forms
+    const a = out.a;
+    const b = out.b;
+    const a_disp = out.a_str;
+    const b_disp = out.b_str;
+
+    // If b is very close to 0, treat it as zero
+    const b_zero = Math.abs(b) < 1e-9;
+
+    if (b_zero) {
+      formulaDiv.textContent = `Final = ${a_disp} × original\n\nSo: original = Final ÷ ${a_disp}`;
+    } else {
+      formulaDiv.textContent = `Final = ${a_disp} × original + (${b_disp})\n\nSo: original = (Final - ${b_disp}) ÷ ${a_disp}`;
+    }
+
+    // Notes
+    notesDiv.textContent = `Hidden multiplier (M ÷ D) = ${a_disp}. Subtract step chosen so added constant cancels: Subtract = ${S_str}.`;
+
+    // clear forward output (until user runs test)
+    forwardOut.textContent = '—';
+  }
+
+  // generate on load
+  renderAll();
+
+  // wire inputs
+  document.getElementById('M').addEventListener('input', renderAll);
+  document.getElementById('A').addEventListener('input', renderAll);
+  document.getElementById('D').addEventListener('input', renderAll);
+  document.querySelectorAll('input[name="order"]').forEach(el=>el.addEventListener('change',renderAll));
+
+  // generate button
+  document.getElementById('generate').addEventListener('click', renderAll);
+
+  // copying
+  document.getElementById('copySteps').addEventListener('click', ()=>{
+    const stepsHtml = document.getElementById('stepsPreview').innerText.trim();
+    navigator.clipboard.writeText(stepsHtml).then(()=> {
+      alert('Steps copied to clipboard');
+    }).catch(()=> alert('Copy failed'));
+  });
+
+  document.getElementById('copyFormula').addEventListener('click', ()=>{
+    const txt = document.getElementById('formulaOut').innerText.trim();
+    if (!txt) return;
+    navigator.clipboard.writeText(txt).then(()=> alert('Formula copied')).catch(()=> alert('Copy failed'));
+  });
+
+  // tester: run forward & reverse for a chosen x
+  document.getElementById('runTest').addEventListener('click', ()=>{
+    const xVal = Number(document.getElementById('testX').value);
+    if (!isFinite(xVal)) { alert('Enter a test number for x'); return; }
+    const out = compute();
+    if (out.error) { alert(out.error); return; }
+    const {M,A,D,order,S} = out;
+
+    // forward:
+    let val = xVal;
+    const stepsExec = [];
+    stepsExec.push({label:'start', value: val});
+    if (order === 'multiply') {
+      val = val * M; stepsExec.push({label:`× ${M}`, value: val});
+      val = val + A; stepsExec.push({label:`+ ${A}`, value: val});
+      val = val / D; stepsExec.push({label:`÷ ${D}`, value: val});
+      val = val - S; stepsExec.push({label:`− ${fmtNum(S)}`, value: val});
+    } else {
+      val = val + A; stepsExec.push({label:`+ ${A}`, value: val});
+      val = val * M; stepsExec.push({label:`× ${M}`, value: val});
+      val = val / D; stepsExec.push({label:`÷ ${D}`, value: val});
+      val = val - S; stepsExec.push({label:`− ${fmtNum(S)}`, value: val});
+    }
+
+    const forwardOut = document.getElementById('forwardOut');
+    forwardOut.textContent = stepsExec.map(s=>`${s.label}  =>  ${fmtNum(s.value)}`).join('\n');
+
+    // reverse: compute original via formula x = (F - b) / a
+    const finalF = val;
+    const a = M / D;
+    // compute b (final = a*x + b) by symbolic derivation used in compute()
+    const b = (order === 'multiply') ? (A/D - S) : ((M*A)/D - S);
+    const recovered = (finalF - b) / a;
+
+    // show small verification next to forward output
+    forwardOut.textContent += `\n\nReverse check: (Final - ${fmtNum(b)}) ÷ ${fmtNum(a)} = ${fmtNum(recovered)}`;
+  });
+
+  // live search not needed here because single trick generator; but keep render on tab focus
+  window.addEventListener('focus', renderAll);
+</script>
+</body>
+</html>
